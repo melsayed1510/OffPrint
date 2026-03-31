@@ -147,22 +147,18 @@
 
   <div id="ui">
     <div class="container box">
-      <h4>طباعة PDF على ورقة رسمية PNG</h4>
+      <h4>طباعة ملف PDF على ورقتك الرسمية</h4>
 
       <div class="row g-3">
         <div class="col-md-6">
-          <label class="mb-2">خلفية الورقة (صورة أو PDF) — مطلوب رفعها</label>
-
-          <button id="btnBgUpload" class="btn btn-primary w-100" type="button">رفع الخلفية</button>
-          <input id="bgFile" type="file" accept="image/*,application/pdf" hidden />
-
-          <div class="hint">
-            الصيغ المقبولة: PNG / JPG / JPEG / WEBP / PDF (سيتم استخدام الصفحة الأولى تلقائيًا).
-          </div>
+          <label class="mb-2">رفع خلفية الورقة الرسمية (صورة أو PDF)</label>
+          <button id="btnBgUpload" class="btn btn-primary w-100" type="button">رفع خلفية الورقة</button>
+          <input id="bgFile" class="form-control" type="file" accept="image/*,application/pdf" hidden />
+          <div class="hint">الصيغ المقبولة: PNG / JPG / JPEG / WEBP / PDF (سيتم استخدام الصفحة الأولى تلقائيًا).</div>
         </div>
 
         <div class="col-md-6">
-          <label class="mb-2">رفع ملف PDF (خلفية بيضاء)</label>
+          <label class="mb-2">رفع ملف PDF المراد طباعته</label>
           <input id="pdfInput" class="form-control" type="file" accept="application/pdf" />
           <div class="hint">يفضل تشغيل الصفحة على localhost (Chrome/Edge).</div>
         </div>
@@ -316,13 +312,10 @@
     function setDiag(text=''){
       dom.statusDiag.textContent = text;
     }
-
-    // ===== Background selection (Image/PDF) — Required =====
     let bgObjectUrl = null;
-    let bgReady = false;
 
     function revokeBgUrl(){
-      revokeBgUrl();
+      try{ if (bgObjectUrl) URL.revokeObjectURL(bgObjectUrl); }catch(e){}
       bgObjectUrl = null;
     }
 
@@ -332,12 +325,11 @@
 
     function requireBackgroundOrWarn(){
       if (getBackgroundSrc()) return true;
-      setStatus('اختر/ارفع خلفية أولاً.', 'اضغط: رفع الخلفية');
+      setStatus('ارفع خلفية الورقة أولاً.', 'اضغط: رفع خلفية الورقة');
       return false;
     }
 
-    async function renderPdfFirstPageToPngObjectUrl(file){
-      // Render page 1 of the uploaded PDF background into an image object URL
+    async function renderPdfFirstPageToPngUrl(file){
       const buf = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
       const page = await pdf.getPage(1);
@@ -346,6 +338,7 @@
       const BASE_DPI = 96;
       const DPI = BASE_DPI * q;
       const mmToPx = (mm) => (mm / 25.4) * DPI;
+
       const targetW = mmToPx(210);
       const targetH = mmToPx(297);
 
@@ -357,16 +350,12 @@
       const ctx = canvas.getContext('2d', { alpha: false });
       canvas.width = Math.max(1, Math.floor(viewport.width));
       canvas.height = Math.max(1, Math.floor(viewport.height));
-
-      // Fill white to avoid transparency artifacts in the background
       ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-
       await page.render({ canvasContext: ctx, viewport }).promise;
-
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
       canvas.width = 1; canvas.height = 1;
-      if (!blob) throw new Error('تعذر تحويل الخلفية إلى PNG');
+      if (!blob) throw new Error('تعذر تحويل خلفية PDF إلى صورة');
       return URL.createObjectURL(blob);
     }
 
@@ -387,20 +376,17 @@
       document.documentElement.classList.toggle('hide-page-no', !on);
     }
 
-    // UI events
     ['safeTop','safeRight','safeBottom','safeLeft','contentScale','contentX','contentY'].forEach(k => dom[k].addEventListener('input', applyVars));
     if (dom.showPageNo) dom.showPageNo.addEventListener('change', applyPageNoToggle);
-
-    // Background upload (single button)
     if (dom.btnBgUpload && dom.bgFile){
       dom.btnBgUpload.addEventListener('click', () => dom.bgFile.click());
     }
+
     if (dom.bgFile){
       dom.bgFile.addEventListener('change', async (e) => {
         const f = e.target.files && e.target.files[0];
         if (!f) return;
         try{
-          // Validate types
           const t = (f.type || '').toLowerCase();
           const isImg = t.startsWith('image/');
           const isPdf = t === 'application/pdf';
@@ -416,19 +402,17 @@
 
           if (isImg){
             bgObjectUrl = URL.createObjectURL(f);
+            setStatus('تم تحميل الخلفية ✅', f.name);
           } else {
-            bgObjectUrl = await renderPdfFirstPageToPngObjectUrl(f);
+            bgObjectUrl = await renderPdfFirstPageToPngUrl(f);
+            setStatus('تم تحميل الخلفية ✅', f.name + ' (صفحة 1)');
           }
-
-          setStatus('تم تحميل الخلفية ✅', isPdf ? (f.name + ' (صفحة 1)') : f.name);
-          bgReady = true;
-        } catch(err){
+        }catch(err){
           console.error(err);
           revokeBgUrl();
-          bgReady = false;
-          setStatus('فشل تحميل الخلفية', 'تأكد من الملف أو جرّب ملف آخر');
+          setStatus('فشل تحميل الخلفية', 'جرّب ملف آخر');
           setDiag(String(err.message || err));
-        } finally {
+        }finally{
           try{ e.target.value = ''; }catch(_e){}
         }
       });
@@ -436,7 +420,7 @@
 
     applyVars();
     applyPageNoToggle();
-// Official-style module loading (local first)
+
     const localPdfModule = './pdf.mjs';
     const localWorker = './pdf.worker.mjs';
     const remotePdfModule = '//mozilla.github.io/pdf.js/build/pdf.mjs';
@@ -454,7 +438,6 @@
       throw new Error('pdfjsLib not found');
     }
 
-    // Remove-white algorithm (preserve colors): remove near-white & low-saturation pixels
     function removeWhiteBackground(ctx, w, h, threshold, softness, satLimit){
       const img = ctx.getImageData(0, 0, w, h);
       const d = img.data;
@@ -501,7 +484,7 @@
 
       const bgFileName = getBackgroundSrc();
  if (!bgFileName){
-   setStatus('اختر/ارفع خلفية أولاً.', 'اضغط: رفع الخلفية');
+   setStatus('ارفع خلفية الورقة أولاً.', 'اضغط: رفع خلفية الورقة');
    return;
  }
       if (!renderedPages.length){
@@ -666,7 +649,6 @@
       setDiag('');
     });
 
-    // Boot pdf.js (official-style)
     (async () => {
       try{
         setStatus('جارٍ تحميل pdf.js (ESM)...', '');
@@ -682,9 +664,8 @@
       }
     })();
 
-    // Cleanup object URLs on unload
     window.addEventListener('beforeunload', () => {
-      revokeBgUrl();
+      try{ if (bgObjectUrl) URL.revokeObjectURL(bgObjectUrl); }catch(e){}
     });
   </script>
 </body>
